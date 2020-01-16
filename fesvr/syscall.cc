@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
 #include <limits.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -49,6 +50,32 @@ struct riscv_stat
       __unused4(0), __unused5(0) {}
 };
 
+struct riscv_sysinfo {
+  int64_t uptime;         /* Seconds since boot */
+  uint64_t loads[3];      /* 1, 5, and 15 minute load averages */
+  uint64_t totalram;      /* Total usable main memory size */
+  uint64_t freeram;       /* Available memory size */
+  uint64_t sharedram;     /* Amount of shared memory */
+  uint64_t bufferram;     /* Memory used by buffers */
+  uint64_t totalswap;     /* Total swap space size */
+  uint64_t freeswap;      /* swap space still available */
+  uint16_t procs;                    /* Number of current processes */
+  uint64_t totalhigh;     /* Total high memory size */
+  uint64_t freehigh;      /* Available high memory size */
+  uint32_t mem_unit;                 /* Memory unit size in bytes */
+
+  explicit riscv_sysinfo(const struct sysinfo& s)
+    : uptime(s.uptime), totalram(s.totalram), freeram(s.freeram),
+      sharedram(s.sharedram), bufferram(s.bufferram), totalswap(s.totalswap),
+      freeswap(s.freeswap), procs(s.procs), totalhigh(s.totalhigh),
+      freehigh(s.freehigh), mem_unit(s.mem_unit) {
+          loads[0] = s.loads[0];
+          loads[1] = s.loads[1];
+          loads[2] = s.loads[2];
+  }
+
+};
+
 syscall_t::syscall_t(htif_t* htif)
   : htif(htif), memif(&htif->memif()), table(2048)
 {
@@ -71,6 +98,7 @@ syscall_t::syscall_t(htif_t* htif)
   table[79] = &syscall_t::sys_fstatat;
   table[80] = &syscall_t::sys_fstat;
   table[93] = &syscall_t::sys_exit;
+  table[179] = &syscall_t::sys_sysinfo;
   table[1039] = &syscall_t::sys_lstat;
   table[2011] = &syscall_t::sys_getmainvars;
 
@@ -187,6 +215,19 @@ reg_t syscall_t::sys_fstat(reg_t fd, reg_t pbuf, reg_t a2, reg_t a3, reg_t a4, r
     memif->write(pbuf, sizeof(rbuf), &rbuf);
   }
   return ret;
+}
+
+reg_t syscall_t::sys_sysinfo(reg_t info, reg_t a1, reg_t a2, reg_t a3, reg_t a4, reg_t a5, reg_t a6)
+{
+    struct sysinfo buf;
+
+    reg_t ret = sysret_errno(sysinfo(&buf));
+    if (ret != (reg_t)-1)
+    {
+        riscv_sysinfo rbuf(buf);
+        memif->write(info, sizeof(rbuf), &rbuf);
+    }
+    return ret;
 }
 
 reg_t syscall_t::sys_fcntl(reg_t fd, reg_t cmd, reg_t arg, reg_t a3, reg_t a4, reg_t a5, reg_t a6)
